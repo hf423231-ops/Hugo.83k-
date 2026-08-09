@@ -1,0 +1,731 @@
+--// FH2ONTOP - PANEL GRADIENTE AZUL GALAXIA CON ESTRELLAS (200x78)
+--// EFECTOS: Sombra plateada letra por letra con desvanecimiento + Estrellas animadas
+--// Selector de tecla/botón personalizable (haz clic en el cuadro y pulsa la tecla deseada)
+
+--// SERVICES
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local CoreGui = game:GetService("CoreGui")
+local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local ConfigFile = "FH2ONTOPConfig.json"
+
+-- ⚙️ PODER EXACTO: 23 - 32 - 70 - 90 (ULTRA)
+local NIVELES = {
+    Low     = { poder = 23 },
+    Mid     = { poder = 32 },
+    High    = { poder = 70 },
+    Ultra   = { poder = 90 }  -- CAMBIADO A 90
+}
+
+-- 🔑 TECLA PREDETERMINADA: M (SIEMPRE M, IGNORA LA CONFIGURACIÓN GUARDADA)
+local keybind = Enum.KeyCode.M
+local listeningForInput = false
+local laggerActive = false
+local lagThread = nil
+local nivelActual = "Low"
+local ventanaBloqueada = false
+local uiScaleValue = 1.0
+
+-- 🎨 ESTILO AZUL GRADIENTE
+local UI_CONFIG = {
+    MainBg       = Color3.fromRGB(0, 0, 0),
+    TitleColor   = Color3.fromRGB(255, 255, 255),
+    TextColor    = Color3.fromRGB(255, 255, 255),
+    ButtonInact  = Color3.fromRGB(40, 40, 40),
+    ButtonLow    = Color3.fromRGB(255, 0, 0),
+    ButtonMid    = Color3.fromRGB(255, 0, 0),
+    ButtonHigh   = Color3.fromRGB(255, 0, 0),
+    ButtonUltra  = Color3.fromRGB(255, 0, 0),  -- RED
+    ToggleOff    = Color3.fromRGB(45, 45, 45),
+    ToggleOn     = Color3.fromRGB(45, 45, 45),
+    LockColor    = Color3.fromRGB(255, 255, 255),
+    UnlockColor  = Color3.fromRGB(150, 150, 170),
+    Font         = Enum.Font.GothamBlack,
+    BorderColor  = Color3.fromRGB(40, 40, 40),
+    GlowColor    = Color3.fromRGB(255, 255, 255),
+    SelectorBg   = Color3.fromRGB(60, 60, 60),
+    SelectorAct  = Color3.fromRGB(255, 255, 255),
+    PurpleText   = Color3.fromRGB(255, 255, 255),  -- LIGHT PURPLE FOR TEXT
+}
+
+-- 💾 CONFIG (SOLO GUARDA NIVEL Y BLOQUEO, LA TECLA SIEMPRE ES M)
+local function SaveConfig()
+    local data = {
+        -- No guardamos Keybind para que siempre sea M
+        Nivel = nivelActual,
+        Bloqueado = ventanaBloqueada,
+        UIScale = uiScaleValue
+    }
+    pcall(function() writefile(ConfigFile, HttpService:JSONEncode(data)) end)
+end
+
+local function LoadConfig()
+    if pcall(isfile, ConfigFile) and isfile(ConfigFile) then
+        pcall(function()
+            local data = HttpService:JSONDecode(readfile(ConfigFile))
+            -- NO SOBREESCRIBIMOS keybind, siempre se mantiene M
+            nivelActual = data.Nivel or "Low"
+            ventanaBloqueada = data.Bloqueado or false
+            uiScaleValue = math.clamp(tonumber(data.UIScale) or 1.0, 0.6, 1.5)
+        end)
+    end
+end
+LoadConfig()
+
+-- ⚠️ LAG ENGINE
+local function bomb(poder)
+    local main, spam = {}, {{}}
+    local z = spam[1]
+    for i = 1, 25 do local t = {} table.insert(z, t) z = t end
+    local max = math.min(12000, poder * 50)
+    for i = 1, max do table.insert(main, spam) end
+    pcall(function() game:GetService("RobloxReplicatedStorage").SetPlayerBlockList:FireServer(main) end)
+end
+
+-- 🧩 ELEMENTOS
+local toggleBall, toggleContainer, btnLow, btnMid, btnHigh, btnUltra, lockButton
+local titleLabel, textLagger, keybindButton, toggleClick, shadowLabel, shadowGradient
+local tryhardText  -- NUEVO: texto "Only for tryhards"
+
+-- Funciones de actualización
+local function actualizarBotonesNivel()
+    -- Low
+    if nivelActual == "Low" then
+        btnLow.BackgroundColor3 = UI_CONFIG.ButtonLow
+        btnLow.TextColor3 = Color3.fromRGB(0, 0, 0)
+        btnLow.BorderSizePixel = 0
+    else
+        btnLow.BackgroundColor3 = UI_CONFIG.ButtonInact
+        btnLow.TextColor3 = Color3.fromRGB(255, 255, 255)
+        btnLow.BorderSizePixel = 1
+        btnLow.BorderColor3 = UI_CONFIG.BorderColor
+    end
+    
+    -- Mid
+    if nivelActual == "Mid" then
+        btnMid.BackgroundColor3 = UI_CONFIG.ButtonMid
+        btnMid.TextColor3 = Color3.fromRGB(0, 0, 0)
+        btnMid.BorderSizePixel = 0
+    else
+        btnMid.BackgroundColor3 = UI_CONFIG.ButtonInact
+        btnMid.TextColor3 = Color3.fromRGB(255, 255, 255)
+        btnMid.BorderSizePixel = 1
+        btnMid.BorderColor3 = UI_CONFIG.BorderColor
+    end
+    
+    -- High
+    if nivelActual == "High" then
+        btnHigh.BackgroundColor3 = UI_CONFIG.ButtonHigh
+        btnHigh.TextColor3 = Color3.fromRGB(255, 255, 255)
+        btnHigh.BorderSizePixel = 0
+    else
+        btnHigh.BackgroundColor3 = UI_CONFIG.ButtonInact
+        btnHigh.TextColor3 = Color3.fromRGB(255, 255, 255)
+        btnHigh.BorderSizePixel = 1
+        btnHigh.BorderColor3 = UI_CONFIG.BorderColor
+    end
+    
+    -- Ultra (NUEVO) - LIGHT PURPLE
+    if nivelActual == "Ultra" then
+        btnUltra.BackgroundColor3 = UI_CONFIG.ButtonUltra  -- LIGHT PURPLE
+        btnUltra.TextColor3 = Color3.fromRGB(255, 255, 255)
+        btnUltra.BorderSizePixel = 0
+        -- Mostrar texto "Only for tryhards" en morado
+        tryhardText.Visible = true
+        tryhardText.TextColor3 = UI_CONFIG.PurpleText
+    else
+        btnUltra.BackgroundColor3 = UI_CONFIG.ButtonInact
+        btnUltra.TextColor3 = Color3.fromRGB(255, 255, 255)
+        btnUltra.BorderSizePixel = 1
+        btnUltra.BorderColor3 = UI_CONFIG.BorderColor
+        -- Ocultar texto cuando no está en Ultra
+        tryhardText.Visible = false
+    end
+end
+
+local function actualizarSwitch()
+    if toggleContainer then
+        toggleContainer.BackgroundColor3 = UI_CONFIG.ToggleOff
+    end
+    if toggleBall then
+        toggleBall.BackgroundColor3 = UI_CONFIG.ToggleOff
+        if laggerActive then
+            toggleBall.Position = UDim2.new(1, -18, 0.5, -9)
+        else
+            toggleBall.Position = UDim2.new(0, 3, 0.5, -9)
+        end
+    end
+    if toggleClick then
+        toggleClick.Text = laggerActive and "ACTIVE" or "INACTIVE"
+        if laggerActive then
+            toggleClick.TextColor3 = Color3.fromRGB(255, 255, 255)
+        else
+            toggleClick.TextColor3 = Color3.fromRGB(255, 255, 255)
+        end
+    end
+end
+
+local function actualizarCandado()
+    lockButton.Text = ventanaBloqueada and "Lock" or "Unlock"
+    lockButton.TextColor3 = ventanaBloqueada and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(150, 150, 170)
+end
+
+local function actualizarKeybindButton()
+    if keybindButton then
+        local display = keybind.Name
+        if display:match("Button") then
+            display = display:gsub("Button", "")
+        end
+        keybindButton.Text = "KEY: " .. display
+    end
+end
+
+local function toggleLagger()
+    laggerActive = not laggerActive
+    local targetPos = laggerActive and UDim2.new(1, -18, 0.5, -9) or UDim2.new(0, 3, 0.5, -9)
+    TweenService:Create(toggleBall, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        Position = targetPos
+    }):Play()
+
+    toggleClick.Text = laggerActive and "ACTIVE" or "INACTIVE"
+    if laggerActive then
+        toggleClick.TextColor3 = Color3.fromRGB(255, 255, 255)
+    else
+        toggleClick.TextColor3 = Color3.fromRGB(255, 255, 255)
+    end
+
+    if laggerActive then
+        if lagThread then task.cancel(lagThread) end
+        lagThread = task.spawn(function()
+            while laggerActive do
+                pcall(function() game:GetService("NetworkClient"):SetOutgoingKBPSLimit(80000) end)
+                bomb(NIVELES[nivelActual].poder)
+                task.wait(0.18)
+            end
+        end)
+    else
+        if lagThread then task.cancel(lagThread); lagThread = nil end
+    end
+end
+
+-- 🖼️ INTERFAZ
+if CoreGui:FindFirstChild("FH2ONTOP_UI") then CoreGui.FH2ONTOP_UI:Destroy() end
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "FH2ONTOP_UI"
+screenGui.Parent = CoreGui
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.ResetOnSpawn = false
+
+-- Panel
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+mainFrame.BackgroundTransparency = 0
+mainFrame.BorderSizePixel = 2
+mainFrame.BorderColor3 = Color3.fromRGB(180, 180, 180)
+mainFrame.Size = UDim2.new(0, 200, 0, 105)
+mainFrame.Position = UDim2.new(0.15, 0, 0.5, -39)
+mainFrame.Parent = screenGui
+mainFrame.ClipsDescendants = true
+
+-- 🔎 TAMAÑO DE L'UI
+local uiScale = Instance.new("UIScale")
+uiScale.Scale = uiScaleValue
+uiScale.Parent = mainFrame
+
+-- 🔴 CONTOUR AUTOUR DE TOUTE L'UI
+local mainCorner = Instance.new("UICorner", mainFrame)
+mainCorner.CornerRadius = UDim.new(0, 8)
+
+local mainStroke = Instance.new("UIStroke", mainFrame)
+mainStroke.Color = Color3.fromRGB(255, 0, 0)
+mainStroke.Thickness = 2
+mainStroke.Transparency = 0
+mainStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+
+-- 🌌 GRADIENTE AZUL GALAXIA
+local gradient = Instance.new("UIGradient", mainFrame)
+gradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(15,15,15)),
+    ColorSequenceKeypoint.new(0.3, Color3.fromRGB(45,45,45)),
+    ColorSequenceKeypoint.new(0.6, Color3.fromRGB(90,90,90)),
+    ColorSequenceKeypoint.new(0.85, Color3.fromRGB(150,150,150)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(235,235,235))
+})
+gradient.Rotation = 90
+
+-- ⭐ ESTRELLAS ANIMADAS
+local stars = {}
+for i = 1, 35 do
+    local star = Instance.new("Frame", mainFrame)
+    star.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    star.BorderSizePixel = 0
+    star.Size = UDim2.new(0, 1 + math.random() * 2, 0, 1 + math.random() * 2)
+    star.Position = UDim2.new(math.random(), 0, math.random(), 0)
+    star.ZIndex = 1
+    star.BackgroundTransparency = 0.2 + math.random() * 0.5
+    
+    local corner = Instance.new("UICorner", star)
+    corner.CornerRadius = UDim.new(1, 0)
+    
+    table.insert(stars, {
+        frame = star,
+        transparency = star.BackgroundTransparency,
+        timer = 2 + math.random() * 2,
+        elapsed = 0
+    })
+end
+
+-- Animación de estrellas
+task.spawn(function()
+    while true do
+        for _, starData in ipairs(stars) do
+            starData.elapsed = starData.elapsed + 0.1
+            if starData.elapsed >= starData.timer then
+                starData.elapsed = 0
+                starData.timer = 2 + math.random() * 2
+                
+                local star = starData.frame
+                TweenService:Create(star, TweenInfo.new(0.5, Enum.EasingStyle.Quad), {
+                    BackgroundTransparency = 1
+                }):Play()
+                
+                task.wait(0.2)
+                
+                star.Position = UDim2.new(math.random(), 0, math.random(), 0)
+                local newSize = 1 + math.random() * 2
+                star.Size = UDim2.new(0, newSize, 0, newSize)
+                
+                TweenService:Create(star, TweenInfo.new(0.5, Enum.EasingStyle.Quad), {
+                    BackgroundTransparency = starData.transparency
+                }):Play()
+            end
+        end
+        task.wait(0.1)
+    end
+end)
+
+-- ═══════════════════════════════════════════
+-- ✨ MINI "FH2ONTOP" DISCRETS DANS TOUTE L'UI
+-- ═══════════════════════════════════════════
+local miniFH2 = {}
+local miniPositions = {
+    {0.02, 0.28}, {0.38, 0.30}, {0.72, 0.29},
+    {0.12, 0.47}, {0.52, 0.48}, {0.82, 0.47},
+    {0.03, 0.64}, {0.32, 0.65}, {0.65, 0.63},
+    {0.15, 0.88}, {0.48, 0.86}, {0.76, 0.87}
+}
+
+for i, pos in ipairs(miniPositions) do
+    local mini = Instance.new("TextLabel", mainFrame)
+    mini.Name = "MiniFH2ONTOP_" .. i
+    mini.BackgroundTransparency = 1
+    mini.Position = UDim2.new(pos[1], 0, pos[2], 0)
+    mini.Size = UDim2.new(0, 42, 0, 8)
+    mini.Font = Enum.Font.GothamBlack
+    mini.Text = "FH2ONTOP"
+    mini.TextColor3 = Color3.fromRGB(255, 255, 255)
+    mini.TextTransparency = 0.72
+    mini.TextSize = 5
+    mini.TextXAlignment = Enum.TextXAlignment.Center
+    mini.TextYAlignment = Enum.TextYAlignment.Center
+    mini.ZIndex = 1
+    miniFH2[i] = mini
+end
+
+-- Petit scintillement aléatoire des mini textes
+task.spawn(function()
+    while true do
+        for _, mini in ipairs(miniFH2) do
+            if math.random() < 0.35 then
+                local oldTransparency = mini.TextTransparency
+                local twIn = TweenService:Create(
+                    mini,
+                    TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                    {TextTransparency = 0.42}
+                )
+                twIn:Play()
+                twIn.Completed:Wait()
+
+                local twOut = TweenService:Create(
+                    mini,
+                    TweenInfo.new(0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                    {TextTransparency = oldTransparency}
+                )
+                twOut:Play()
+            end
+        end
+        task.wait(0.35)
+    end
+end)
+
+-- ═══════════════════════════════════════════
+-- TÍTULO "FH2ONTOP" - BRILLANCE BLANCHE LETTRE PAR LETTRE
+-- ═══════════════════════════════════════════
+
+local titleLetters = {}
+local titleText = "FH2ONTOP"
+local letterWidth = 10 -- Petit espacement entre les lettres, sans trop les éloigner
+
+for i = 1, #titleText do
+    local letter = Instance.new("TextLabel", mainFrame)
+    letter.BackgroundTransparency = 1
+    letter.Position = UDim2.new(0, 3 + (i - 1) * letterWidth, 0, 0)
+    letter.Size = UDim2.new(0, letterWidth - 1, 0, 22)
+    letter.Font = Enum.Font.GothamBlack
+    letter.Text = string.sub(titleText, i, i)
+    letter.TextColor3 = Color3.fromRGB(255, 255, 255)
+    letter.TextSize = 16
+    letter.TextXAlignment = Enum.TextXAlignment.Center
+    letter.TextYAlignment = Enum.TextYAlignment.Center
+    letter.ZIndex = 4
+    letter.ClipsDescendants = false
+    letter.TextTransparency = 0.05
+    letter.TextStrokeColor3 = Color3.fromRGB(255, 255, 255)
+    letter.TextStrokeTransparency = 1
+
+    table.insert(titleLetters, letter)
+end
+
+-- ✨ Chaque lettre brille l'une après l'autre en blanc
+task.spawn(function()
+    while true do
+        for _, letter in ipairs(titleLetters) do
+            -- Montée rapide du glow
+            local glowIn = TweenService:Create(
+                letter,
+                TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                {
+                    TextTransparency = 0,
+                    TextStrokeTransparency = 0.05
+                }
+            )
+            glowIn:Play()
+            glowIn.Completed:Wait()
+
+            -- Petit maintien du flash
+            task.wait(0.06)
+
+            -- Disparition douce du glow
+            local glowOut = TweenService:Create(
+                letter,
+                TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                {
+                    TextTransparency = 0.05,
+                    TextStrokeTransparency = 1
+                }
+            )
+            glowOut:Play()
+
+            -- Passage à la lettre suivante
+            task.wait(0.035)
+        end
+
+        task.wait(0.35)
+    end
+end)
+
+-- ═══════════════════════════════════════════
+-- TEXTO "Only for tryhards" (NUEVO)
+-- ═══════════════════════════════════════════
+tryhardText = Instance.new("TextLabel", mainFrame)
+tryhardText.BackgroundTransparency = 1
+tryhardText.Position = UDim2.new(0, 5, 0, 94)
+tryhardText.Size = UDim2.new(0, 120, 0, 10)
+tryhardText.Font = Enum.Font.GothamBlack
+tryhardText.Text = "Only for tryhards"
+tryhardText.TextColor3 = UI_CONFIG.PurpleText
+tryhardText.TextSize = 8
+tryhardText.TextXAlignment = Enum.TextXAlignment.Left
+tryhardText.TextYAlignment = Enum.TextYAlignment.Center
+tryhardText.ZIndex = 2
+tryhardText.Visible = false  -- Oculto por defecto
+
+-- ═══════════════════════════════════════════
+-- BOTONES KEY Y LOCK
+-- ═══════════════════════════════════════════
+keybindButton = Instance.new("TextButton", mainFrame)
+keybindButton.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+keybindButton.BackgroundTransparency = 0.1
+keybindButton.Position = UDim2.new(1, -62, 0, 1)
+keybindButton.Size = UDim2.new(0, 34, 0, 12)
+keybindButton.Font = Enum.Font.GothamBlack
+keybindButton.Text = "KEY: M"
+keybindButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+keybindButton.TextSize = 6
+keybindButton.AutoButtonColor = false
+keybindButton.ZIndex = 2
+Instance.new("UICorner", keybindButton).CornerRadius = UDim.new(0, 5)
+actualizarKeybindButton()
+
+lockButton = Instance.new("TextButton", mainFrame)
+lockButton.BackgroundTransparency = 0
+lockButton.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+lockButton.BackgroundTransparency = 0.1
+lockButton.Position = UDim2.new(1, -28, 0, 1)
+lockButton.Size = UDim2.new(0, 26, 0, 12)
+lockButton.Font = Enum.Font.GothamBlack
+lockButton.TextSize = 6
+lockButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+lockButton.AutoButtonColor = false
+lockButton.ZIndex = 2
+Instance.new("UICorner", lockButton).CornerRadius = UDim.new(0, 5)
+lockButton.MouseButton1Click:Connect(function()
+    ventanaBloqueada = not ventanaBloqueada
+    actualizarCandado()
+    SaveConfig()
+end)
+actualizarCandado()
+
+-- ═══════════════════════════════════════════
+-- 🔎 CONTRÔLE DE TAILLE DE L'UI
+-- ═══════════════════════════════════════════
+local uiSizeMinus = Instance.new("TextButton", mainFrame)
+uiSizeMinus.Name = "UISizeMinus"
+uiSizeMinus.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+uiSizeMinus.BackgroundTransparency = 0.1
+uiSizeMinus.Position = UDim2.new(1, -86, 0, 1)
+uiSizeMinus.Size = UDim2.new(0, 20, 0, 18)
+uiSizeMinus.Font = Enum.Font.GothamBlack
+uiSizeMinus.Text = "-"
+uiSizeMinus.TextColor3 = Color3.fromRGB(255, 255, 255)
+uiSizeMinus.TextSize = 14
+uiSizeMinus.AutoButtonColor = false
+uiSizeMinus.ZIndex = 4
+Instance.new("UICorner", uiSizeMinus).CornerRadius = UDim.new(0, 4)
+
+local uiSizePlus = Instance.new("TextButton", mainFrame)
+uiSizePlus.Name = "UISizePlus"
+uiSizePlus.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+uiSizePlus.BackgroundTransparency = 0.1
+uiSizePlus.Position = UDim2.new(1, -108, 0, 1)
+uiSizePlus.Size = UDim2.new(0, 20, 0, 18)
+uiSizePlus.Font = Enum.Font.GothamBlack
+uiSizePlus.Text = "+"
+uiSizePlus.TextColor3 = Color3.fromRGB(255, 255, 255)
+uiSizePlus.TextSize = 14
+uiSizePlus.AutoButtonColor = false
+uiSizePlus.ZIndex = 4
+Instance.new("UICorner", uiSizePlus).CornerRadius = UDim.new(0, 4)
+
+local function updateUIScale()
+    uiScaleValue = math.clamp(uiScaleValue, 0.6, 1.5)
+    uiScale.Scale = uiScaleValue
+    SaveConfig()
+end
+
+uiSizeMinus.MouseButton1Click:Connect(function()
+    uiScaleValue = uiScaleValue - 0.1
+    updateUIScale()
+end)
+
+uiSizePlus.MouseButton1Click:Connect(function()
+    uiScaleValue = uiScaleValue + 0.1
+    updateUIScale()
+end)
+
+-- ═══════════════════════════════════════════
+-- "LAGGER"
+-- ═══════════════════════════════════════════
+textLagger = Instance.new("TextLabel", mainFrame)
+textLagger.BackgroundTransparency = 1
+textLagger.Position = UDim2.new(0, 5, 0, 24)
+textLagger.Size = UDim2.new(0, 65, 0, 18)
+textLagger.Font = Enum.Font.GothamBlack
+textLagger.Text = "ZEYHUBB LAGGER"
+textLagger.TextColor3 = Color3.fromRGB(255, 255, 255)
+textLagger.TextSize = 11
+textLagger.TextXAlignment = Enum.TextXAlignment.Left
+textLagger.TextYAlignment = Enum.TextYAlignment.Center
+textLagger.ZIndex = 2
+
+-- ═══════════════════════════════════════════
+-- SWITCH
+-- ═══════════════════════════════════════════
+toggleContainer = Instance.new("Frame", mainFrame)
+toggleContainer.BackgroundColor3 = UI_CONFIG.ToggleOff
+toggleContainer.Position = UDim2.new(1, -52, 0, 24)
+toggleContainer.Size = UDim2.new(0, 44, 0, 18)
+toggleContainer.ZIndex = 2
+Instance.new("UICorner", toggleContainer).CornerRadius = UDim.new(1,0)
+
+toggleBall = Instance.new("Frame", toggleContainer)
+toggleBall.BackgroundColor3 = UI_CONFIG.ToggleOff
+toggleBall.Size = UDim2.new(0, 16, 0, 16)
+toggleBall.Position = UDim2.new(0, 2, 0.5, -8)
+toggleBall.ZIndex = 2
+Instance.new("UICorner", toggleBall).CornerRadius = UDim.new(1,0)
+
+toggleClick = Instance.new("TextButton", toggleContainer)
+toggleClick.BackgroundTransparency = 0
+toggleClick.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+toggleClick.Size = UDim2.new(1,0,1,0)
+toggleClick.ZIndex = 3
+toggleClick.Font = Enum.Font.GothamBlack
+toggleClick.Text = "INACTIVE"
+toggleClick.TextSize = 6
+toggleClick.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleClick.TextXAlignment = Enum.TextXAlignment.Center
+toggleClick.TextYAlignment = Enum.TextYAlignment.Center
+toggleClick.MouseButton1Click:Connect(toggleLagger)
+toggleClick.AutoButtonColor = false
+local corner = Instance.new("UICorner", toggleClick)
+corner.CornerRadius = UDim.new(1,0)
+
+-- ═══════════════════════════════════════════
+-- SELECTOR DE TECLA
+-- ═══════════════════════════════════════════
+keybindButton.MouseButton1Click:Connect(function()
+    if listeningForInput then return end
+    listeningForInput = true
+    keybindButton.Text = "KEY: ..."
+    keybindButton.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
+    keybindButton.TextColor3 = Color3.fromRGB(255,255,255)
+end)
+
+local inputConnection
+inputConnection = UserInputService.InputBegan:Connect(function(input, gp)
+    if not listeningForInput then return end
+    if gp then return end
+
+    local newKey = nil
+    if input.KeyCode ~= Enum.KeyCode.Unknown then
+        newKey = input.KeyCode
+    elseif input.UserInputType == Enum.UserInputType.Gamepad1 and input.KeyCode ~= Enum.KeyCode.Unknown then
+        newKey = input.KeyCode
+    end
+
+    if newKey then
+        keybind = newKey
+        actualizarKeybindButton()
+        listeningForInput = false
+        keybindButton.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+        keybindButton.BackgroundTransparency = 0.1
+        keybindButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    end
+end)
+
+-- ═══════════════════════════════════════════
+-- BOTONES LOW/MID/HIGH/ULTRA
+-- ═══════════════════════════════════════════
+local btnY = 72
+local btnW = 42
+local btnH = 20
+local espaciado = 3
+local margenIzq = 3
+
+btnLow = Instance.new("TextButton", mainFrame)
+btnLow.Size = UDim2.new(0, btnW, 0, btnH)
+btnLow.Position = UDim2.new(0, margenIzq, 0, btnY)
+btnLow.Font = UI_CONFIG.Font
+btnLow.Text = "LOW"
+btnLow.TextColor3 = Color3.fromRGB(255, 255, 255)
+btnLow.TextSize = 8
+btnLow.AutoButtonColor = false
+btnLow.BackgroundColor3 = UI_CONFIG.ButtonInact
+btnLow.BorderSizePixel = 1
+btnLow.BorderColor3 = UI_CONFIG.BorderColor
+btnLow.ZIndex = 2
+Instance.new("UICorner", btnLow).CornerRadius = UDim.new(0, 6)
+btnLow.MouseButton1Click:Connect(function()
+    nivelActual = "Low"
+    actualizarBotonesNivel()
+    SaveConfig()
+end)
+
+btnMid = Instance.new("TextButton", mainFrame)
+btnMid.Size = UDim2.new(0, btnW, 0, btnH)
+btnMid.Position = UDim2.new(0, margenIzq + btnW + espaciado, 0, btnY)
+btnMid.Font = UI_CONFIG.Font
+btnMid.Text = "MID"
+btnMid.TextColor3 = Color3.fromRGB(255, 255, 255)
+btnMid.TextSize = 8
+btnMid.AutoButtonColor = false
+btnMid.BackgroundColor3 = UI_CONFIG.ButtonInact
+btnMid.BorderSizePixel = 1
+btnMid.BorderColor3 = UI_CONFIG.BorderColor
+btnMid.ZIndex = 2
+Instance.new("UICorner", btnMid).CornerRadius = UDim.new(0, 6)
+btnMid.MouseButton1Click:Connect(function()
+    nivelActual = "Mid"
+    actualizarBotonesNivel()
+    SaveConfig()
+end)
+
+btnHigh = Instance.new("TextButton", mainFrame)
+btnHigh.Size = UDim2.new(0, btnW, 0, btnH)
+btnHigh.Position = UDim2.new(0, margenIzq + (btnW + espaciado) * 2, 0, btnY)
+btnHigh.Font = UI_CONFIG.Font
+btnHigh.Text = "HIGH"
+btnHigh.TextColor3 = Color3.fromRGB(255, 255, 255)
+btnHigh.TextSize = 8
+btnHigh.AutoButtonColor = false
+btnHigh.BackgroundColor3 = UI_CONFIG.ButtonInact
+btnHigh.BorderSizePixel = 1
+btnHigh.BorderColor3 = UI_CONFIG.BorderColor
+btnHigh.ZIndex = 2
+Instance.new("UICorner", btnHigh).CornerRadius = UDim.new(0, 6)
+btnHigh.MouseButton1Click:Connect(function()
+    nivelActual = "High"
+    actualizarBotonesNivel()
+    SaveConfig()
+end)
+
+-- NUEVO BOTÓN ULTRA - LIGHT PURPLE
+btnUltra = Instance.new("TextButton", mainFrame)
+btnUltra.Size = UDim2.new(0, btnW, 0, btnH)
+btnUltra.Position = UDim2.new(0, margenIzq + (btnW + espaciado) * 3, 0, btnY)
+btnUltra.Font = UI_CONFIG.Font
+btnUltra.Text = "ULTRA"
+btnUltra.TextColor3 = Color3.fromRGB(255, 255, 255)
+btnUltra.TextSize = 7
+btnUltra.AutoButtonColor = false
+btnUltra.BackgroundColor3 = UI_CONFIG.ButtonInact
+btnUltra.BorderSizePixel = 1
+btnUltra.BorderColor3 = UI_CONFIG.BorderColor
+btnUltra.ZIndex = 2
+Instance.new("UICorner", btnUltra).CornerRadius = UDim.new(0, 6)
+btnUltra.MouseButton1Click:Connect(function()
+    nivelActual = "Ultra"
+    actualizarBotonesNivel()
+    SaveConfig()
+end)
+
+actualizarBotonesNivel()
+actualizarSwitch()
+
+-- ARRASTRAR
+local isDragging, dragStart, startPos = false, nil, nil
+mainFrame.InputBegan:Connect(function(input)
+    if ventanaBloqueada then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        isDragging = true
+        dragStart = input.Position
+        startPos = mainFrame.Position
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if not isDragging or ventanaBloqueada then return end
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        local delta = input.Position - dragStart
+        mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+mainFrame.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        isDragging = false
+    end
+end)
+
+-- 🎮 ACTIVACIÓN CON LA TECLA SELECCIONADA
+UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == keybind or (input.UserInputType == Enum.UserInputType.Gamepad1 and input.KeyCode == keybind) then
+        toggleLagger()
+    end
+end)
